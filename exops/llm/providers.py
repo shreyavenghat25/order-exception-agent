@@ -9,7 +9,6 @@ import urllib.request
 
 from exops.llm.base import LLMRequest, LLMResult, estimate_tokens, extract_json
 
-
 _RETRYABLE = {408, 409, 429, 500, 502, 503, 504, 529}
 _last_call = [0.0]
 

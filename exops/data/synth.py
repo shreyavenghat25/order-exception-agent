@@ -35,6 +35,7 @@ class Dataset:
     samples: list[Sample] = field(default_factory=list)
 
 
+STREETS = ["MG Road", "Anna Salai", "Main St", "2nd Cross", "Lake View"]
 CITIES = [("Chennai", "600"), ("Bengaluru", "560"), ("Mumbai", "400"), ("Delhi", "110"),
           ("Hyderabad", "500"), ("Coimbatore", "641"), ("Pune", "411"), ("Kolkata", "700")]
 
@@ -45,7 +46,7 @@ def _order(rng: random.Random, i: int, **kw) -> Order:
         order_id=f"OD{100000 + i}",
         customer_id=f"C{rng.randint(10000, 99999)}",
         customer_phone=f"+91 9{rng.randint(100000000, 999999999)}",
-        address=f"{rng.randint(1, 300)}, {rng.choice(['MG Road', 'Anna Salai', 'Main St', '2nd Cross', 'Lake View'])}, {city}",
+        address=f"{rng.randint(1, 300)}, {rng.choice(STREETS)}, {city}",
         pincode=f"{pin}{rng.randint(0, 99):03d}",
         amount=round(rng.choice([rng.uniform(299, 2999), rng.uniform(3000, 12000), rng.uniform(12000, 60000)]), 2),
         payment_mode="PREPAID",

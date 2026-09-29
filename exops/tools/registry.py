@@ -5,8 +5,9 @@ The guardrail layer and the executor both rely on this metadata, so agents never
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from exops.models import ActionResult, PlannedAction, RiskLevel
 from exops.tools.backends import COURIERS, World

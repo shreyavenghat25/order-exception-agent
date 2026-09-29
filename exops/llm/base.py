@@ -49,8 +49,8 @@ def extract_json(text: str) -> dict[str, Any]:
         text = text[text.find("\n") + 1:] if "\n" in text else text
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as err:
         m = _JSON_BLOCK.search(text)
         if not m:
-            raise ValueError(f"no JSON object in model output: {text[:200]}")
+            raise ValueError(f"no JSON object in model output: {text[:200]}") from err
         return json.loads(m.group(0))

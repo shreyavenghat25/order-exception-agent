@@ -58,7 +58,7 @@ def test_saga_rollback_restores_state():
 
 
 def test_guardrail_blocks_overrefund():
-    ds, p = _platform()
+    _, p = _platform()
     oid = next(o for o, x in p.world.orders.items() if x.payment_mode == "PREPAID")
     obs = {"get_order": p.world.get_order(oid), "get_payment_ledger": p.world.get_payment_ledger(oid)}
     cls = Classification(exception_type=ExceptionType.REFUND_MISMATCH, confidence=0.99, severity=RiskLevel.HIGH,

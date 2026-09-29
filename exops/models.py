@@ -106,7 +106,7 @@ class Usage(BaseModel):
     latency_ms: float = 0.0
     calls: int = 0
 
-    def add(self, other: "Usage") -> None:
+    def add(self, other: Usage) -> None:
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
         self.cost_inr += other.cost_inr

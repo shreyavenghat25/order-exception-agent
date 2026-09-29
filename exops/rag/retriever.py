@@ -46,7 +46,7 @@ class SOPRetriever:
         self.idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
 
     @classmethod
-    def from_dir(cls, path: Path = SOP_DIR) -> "SOPRetriever":
+    def from_dir(cls, path: Path = SOP_DIR) -> SOPRetriever:
         docs = []
         for p in sorted(path.glob("*.md")):
             text = p.read_text()
@@ -57,7 +57,7 @@ class SOPRetriever:
     def search(self, query: str, k: int = 3) -> list[Hit]:
         q = tokenize(query)
         hits = []
-        for doc, tf, ln in zip(self.docs, self.tfs, self.lens):
+        for doc, tf, ln in zip(self.docs, self.tfs, self.lens, strict=True):
             s = 0.0
             for t in q:
                 if t not in tf:

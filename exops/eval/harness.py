@@ -130,8 +130,10 @@ def run(n: int = 300, seed: int = 11, judge_sample: int = 40, baseline: bool = T
         base = Platform(generate(n=n, seed=seed).world, s_large)
         base_rows = [(base.process(smp.event), smp) for smp in generate(n=n, seed=seed).samples]
         always_large_avg = sum(c.usage.cost_inr for c, _ in base_rows) / N
-        always_large_acc = sum(c.classification is not None and c.classification.exception_type == smp.truth.exception_type
-                               for c, smp in base_rows) / N
+        always_large_acc = sum(
+            c.classification is not None and c.classification.exception_type == smp.truth.exception_type
+            for c, smp in base_rows
+        ) / N
 
     # simulated MTTR
     def mttr(r: dict[str, Any]) -> float:

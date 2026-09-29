@@ -34,7 +34,7 @@ class World:
     expedited: set[str] = field(default_factory=set)
     address_checks: set[str] = field(default_factory=set)
 
-    def snapshot(self) -> "World":
+    def snapshot(self) -> World:
         return copy.deepcopy(self)
 
     # ------------------------------------------------------------------ read APIs
