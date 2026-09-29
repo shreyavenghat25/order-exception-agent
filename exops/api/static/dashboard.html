@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ExOps Console</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#16181d;--mute:#667085;--line:#e4e7ec;--acc:#2f5bea;
+--ok:#12805c;--warn:#b54708;--bad:#c01048;--chip:#eef2ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--panel:#171a21;--ink:#e7e9ee;--mute:#98a2b3;
+--line:#262b36;--acc:#7c9cff;--ok:#3ccb8f;--warn:#f5a524;--bad:#ff5c8a;--chip:#1e2640}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+background:var(--bg);color:var(--ink)}
+header{display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:16px;margin:0}header .sub{color:var(--mute)}header .sp{flex:1}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}button:hover{filter:brightness(.97)}
+main{padding:20px 24px;max-width:1280px;margin:auto}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.kpi .l{color:var(--mute);font-size:12px}.kpi .v{font-size:24px;font-weight:600;margin-top:4px}
+.tabs{display:flex;gap:6px;margin-bottom:12px}.tabs button.on{background:var(--chip);border-color:var(--acc)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:auto}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--mute);font-weight:500;position:sticky;top:0;background:var(--panel)}
+tr.row{cursor:pointer}tr.row:hover{background:var(--chip)}
+.chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:var(--chip);margin:1px 2px 1px 0}
+.s-AUTO_RESOLVED,.s-APPROVED_RESOLVED{color:var(--ok)}.s-PENDING_APPROVAL{color:var(--warn)}
+.s-ESCALATED,.s-FAILED,.s-REJECTED,.s-ROLLED_BACK{color:var(--bad)}
+.mute{color:var(--mute)}
+#drawer{position:fixed;top:0;right:0;width:min(560px,100%);height:100%;background:var(--panel);border-left:1px solid var(--line);
+transform:translateX(100%);transition:.2s;overflow:auto;padding:20px;z-index:5}
+#drawer.open{transform:none}pre{white-space:pre-wrap;background:var(--bg);padding:10px;border-radius:8px;font-size:12px}
+.tl{border-left:2px solid var(--line);margin-left:6px;padding-left:14px}.tl div{margin-bottom:10px}
+.pass{color:var(--ok);font-weight:600}.fail{color:var(--bad);font-weight:600}
+@media (max-width:640px){main,header{padding:12px 16px}}
+</style>
+</head>
+<body>
+<header><h1>Order Exception Intelligence</h1><span class="sub">agentic resolution console</span><span class="sp"></span>
+<button onclick="reseed()">Re-seed 60 events</button><button class="pri" onclick="runEval()">Run eval gate</button></header>
+<main>
+<div class="kpis" id="kpis"></div>
+<div class="tabs"><button data-t="cases" class="on">All cases</button><button data-t="queue">Approval queue</button><button data-t="eval">Eval report</button></div>
+<div class="panel" id="view"></div>
+</main>
+<div id="drawer"></div>
+<script>
+const $=s=>document.querySelector(s);let tab='cases';
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,o){const r=await fetch(p,o);if(!r.ok)throw new Error(await r.text());return r.json()}
+async function kpis(){const m=await api('/api/metrics');const k=[['Cases',m.cases],['Auto-resolved',(m.auto_resolution_rate*100).toFixed(1)+'%'],
+['Awaiting approval',m.pending_approval],['Model escalations',(m.escalation_rate*100).toFixed(0)+'%'],['Avg LLM cost','₹'+m.avg_cost_inr.toFixed(3)],['p95 latency',(m.p95_latency_ms/1000).toFixed(2)+'s']];
+$('#kpis').innerHTML=k.map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}
+function rows(cs,queue){if(!cs.length)return '<p class="mute" style="padding:16px">Nothing here.</p>';
+return `<table><tr><th>Case</th><th>Type</th><th>Conf.</th><th>Plan</th><th>Status</th>${queue?'<th>Why a human</th><th></th>':''}</tr>`+
+cs.map(c=>`<tr class="row" onclick="openCase('${c.case_id}')"><td><b>${c.order_id}</b><div class="mute">${esc(c.description)}</div></td>
+<td>${c.type??''}</td><td>${c.confidence?.toFixed(2)??''}</td><td>${c.actions.map(a=>`<span class="chip">${a.tool}</span>`).join('')}</td>
+<td class="s-${c.status}">${c.status.replace('_',' ')}</td>${queue?`<td>${c.approval_reasons.map(esc).join('<br>')}</td>
+<td onclick="event.stopPropagation()"><button class="pri" onclick="decide('${c.case_id}','approve')">Approve</button> <button onclick="decide('${c.case_id}','reject')">Reject</button></td>`:''}</tr>`).join('')+'</table>'}
+async function render(){await kpis();if(tab==='eval')return;const cs=await api('/api/cases'+(tab==='queue'?'?status=PENDING_APPROVAL':''));$('#view').innerHTML=rows(cs.reverse(),tab==='queue')}
+async function openCase(id){const c=await api('/api/cases/'+id);const d=$('#drawer');
+d.innerHTML=`<button onclick="$('#drawer').classList.remove('open')">Close</button>
+<h2>${c.order_id} <span class="s-${c.status}" style="font-size:14px">${c.status}</span></h2><p>${esc(c.description)}</p>
+<p><b>${c.type}</b> · confidence ${c.confidence?.toFixed(2)} · severity ${c.severity} · SOP ${c.cited_sops.join(', ')}</p>
+<p class="mute">Models: ${c.models.join(' → ')} · ₹${c.cost_inr} · ${c.latency_ms} ms</p>
+<h3>Plan</h3>${c.actions.map(a=>`<div><span class="chip">${a.tool}</span> <code>${esc(JSON.stringify(a.args))}</code><div class="mute">${esc(a.reason)}</div></div>`).join('')}
+${c.status==='AUTO_RESOLVED'||c.status==='APPROVED_RESOLVED'?`<p><button onclick="decide('${c.case_id}','rollback')">Roll back (run compensations)</button></p>`:''}
+<h3>Observations</h3><pre>${esc(JSON.stringify(c.observations,null,2))}</pre>
+<h3>Audit trail</h3><div class="tl">${c.audit.map(e=>`<div><b>${e.stage}</b> <span class="mute">by ${esc(e.actor)} · ${new Date(e.ts*1000).toLocaleTimeString()}</span></div>`).join('')}</div>`;
+d.classList.add('open')}
+async function decide(id,what){await api(`/api/cases/${id}/${what}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approver:'ops-lead'})});
+$('#drawer').classList.remove('open');render()}
+async function reseed(){await api('/api/demo/seed',{method:'POST'});render()}
+async function runEval(){tab='eval';setTabs();$('#view').innerHTML='<p style="padding:16px">Running 150-case golden set, red-team suite and judge…</p>';
+const r=await api('/api/eval',{method:'POST'});const m=r.metrics;
+$('#view').innerHTML=`<div style="padding:16px"><h2>Release gate: <span class="${r.passed?'pass':'fail'}">${r.passed?'PASS':'FAIL'}</span></h2>
+<table><tr><th>Gate</th><th>Value</th><th>Threshold</th><th></th></tr>${Object.entries(r.gates).map(([k,g])=>`<tr><td>${k}</td><td>${g.value}</td><td>${g.threshold}</td><td class="${g.pass?'pass':'fail'}">${g.pass?'pass':'FAIL'}</td></tr>`).join('')}</table>
+<h3>Headline</h3><p>Router saves <b>${m.router_cost_saving_pct}%</b> LLM cost vs always-large (₹${m.avg_cost_inr} vs ₹${m.always_large_avg_cost_inr} per case) at ${(m.classification_accuracy*100).toFixed(1)}% vs ${(m.always_large_classification_accuracy*100).toFixed(1)}% accuracy.
+Simulated MTTR ${m.agent_mttr_hours_simulated} h vs manual baseline ${m.manual_mttr_hours_baseline} h.</p>
+<h3>Per type</h3><table><tr><th>Type</th><th>n</th><th>Classification</th><th>Action match</th></tr>${Object.entries(r.per_type).map(([t,v])=>`<tr><td>${t}</td><td>${v.n}</td><td>${v.cls_acc}</td><td>${v.action_em}</td></tr>`).join('')}</table>
+<h3>Red-team</h3>${Object.entries(r.redteam).map(([k,v])=>`<span class="chip">${v.stopped?'✓':'✗'} ${k}</span>`).join('')}</div>`}
+function setTabs(){document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab))}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;setTabs();tab==='eval'?runEval():render()});
+render();
+</script>
+</body>
+</html>

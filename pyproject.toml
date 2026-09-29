@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exops"
+version = "0.1.0"
+description = "Agentic Order Exception Resolution Platform: multi-agent triage, SOP-grounded planning, guardrails, human-in-the-loop, eval-gated releases."
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.5", "fastapi>=0.110", "uvicorn>=0.27"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+include = ["exops*"]
+
+[tool.setuptools.package-data]
+exops = ["data/sops/*.md", "api/static/*.html"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
