@@ -47,6 +47,11 @@ def _post(url: str, payload: dict, headers: dict, timeout: float = 60.0, retries
     raise RuntimeError("unreachable")
 
 
+def _is_reasoning_model(model: str) -> bool:
+    m = model.lower()
+    return any(k in m for k in ("gpt-oss", "o1", "o3", "o4", "gpt-5", "qwen3", "deepseek-r1"))
+
+
 class AnthropicProvider:
     def __init__(self, model: str):
         self.model = model
@@ -74,12 +79,13 @@ class OpenAIProvider:
 
     def complete(self, req: LLMRequest) -> LLMResult:
         t0 = time.perf_counter()
-        body = _post(
-            f"{self.base}/chat/completions",
-            {"model": self.model, "max_tokens": req.max_tokens, "response_format": {"type": "json_object"},
-             "messages": [{"role": "system", "content": req.system}, {"role": "user", "content": req.prompt}]},
-            {"authorization": f"Bearer {self.key}"},
-        )
+        payload = {"model": self.model, "max_tokens": req.max_tokens, "response_format": {"type": "json_object"},
+                   "messages": [{"role": "system", "content": req.system}, {"role": "user", "content": req.prompt}]}
+        if _is_reasoning_model(self.model):
+            # reasoning tokens count against max_tokens: keep effort low and leave room for the JSON answer
+            payload["reasoning_effort"] = os.environ.get("EXOPS_REASONING_EFFORT", "low")
+            payload["max_tokens"] = max(req.max_tokens, int(os.environ.get("EXOPS_REASONING_MAX_TOKENS", "2048")))
+        body = _post(f"{self.base}/chat/completions", payload, {"authorization": f"Bearer {self.key}"})
         text = body["choices"][0]["message"]["content"]
         u = body.get("usage", {})
         return LLMResult(extract_json(text), text, self.model, u.get("prompt_tokens", 0),
