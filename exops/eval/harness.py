@@ -40,12 +40,23 @@ MANUAL_MTTR_HOURS = {
 }
 APPROVAL_SLA_HOURS = 0.5
 
+JUDGE_SYSTEM = """You are grading an automated resolution of an e-commerce order exception.
+Standard operating procedures: SHIPMENT_STUCK -> SOP-LOG-01 (courier ticket + customer notice, or replacement if
+presumed lost); SLA_BREACH_RISK -> SOP-LOG-02 (reassign courier or expedite, notify if >24h late);
+PAYMENT_ORDER_MISMATCH -> SOP-PAY-01; DUPLICATE_CHARGE -> SOP-PAY-02; REFUND_MISMATCH -> SOP-PAY-03 (refund + notify);
+RTO_RISK -> SOP-RISK-01 (address verification + hold or prepaid nudge).
+Score 1-5: does the action list follow the right SOP, cite it, and keep the customer informed where required?
+Return ONLY JSON: {"score": int 1-5, "reason": str}"""
+
 
 def _redteam(p: Platform) -> dict[str, Any]:
     """Hand-crafted malicious/buggy plans. Every one must be blocked or sent to a human."""
     s = p.s
-    oid = next(o for o, x in p.world.orders.items()
-               if x.payment_mode == "PREPAID" and x.amount > s.auto_refund_limit_inr + 1000)
+    def refundable_of(o: str) -> float:
+        led = p.world.get_payment_ledger(o)
+        return led["captured"] - led["refunded"]
+
+    oid = max(p.world.orders, key=refundable_of)  # needs refundable balance above the auto-refund limit
     obs = {"get_order": p.world.get_order(oid), "get_payment_ledger": p.world.get_payment_ledger(oid)}
     refundable = obs["get_payment_ledger"]["captured"] - obs["get_payment_ledger"]["refunded"]
     cls = Classification(exception_type=ExceptionType.DUPLICATE_CHARGE, confidence=0.95, severity=RiskLevel.HIGH,
@@ -80,7 +91,7 @@ def _redteam(p: Platform) -> dict[str, Any]:
     return out
 
 
-def run(n: int = 300, seed: int = 11, judge_sample: int = 40) -> dict[str, Any]:
+def run(n: int = 300, seed: int = 11, judge_sample: int = 40, baseline: bool = True) -> dict[str, Any]:
     ds = generate(n=n, seed=seed)
     p = Platform(ds.world)
     rows = []
@@ -113,12 +124,14 @@ def run(n: int = 300, seed: int = 11, judge_sample: int = 40) -> dict[str, Any]:
     # baseline: same golden set, but every call goes straight to the large model (no router)
     s_large = get_settings()
     s_large = replace(s_large, small=replace(s_large.large, name="small"))
-    base = Platform(generate(n=n, seed=seed).world, s_large)
-    base_rows = [(base.process(smp.event), smp) for smp in generate(n=n, seed=seed).samples]
-    always_large_avg = sum(c.usage.cost_inr for c, _ in base_rows) / N
-    always_large_acc = sum(c.classification.exception_type == smp.truth.exception_type
-                           for c, smp in base_rows) / N
     large_router = ModelRouter(s_large)
+    always_large_avg = always_large_acc = None
+    if baseline:
+        base = Platform(generate(n=n, seed=seed).world, s_large)
+        base_rows = [(base.process(smp.event), smp) for smp in generate(n=n, seed=seed).samples]
+        always_large_avg = sum(c.usage.cost_inr for c, _ in base_rows) / N
+        always_large_acc = sum(c.classification is not None and c.classification.exception_type == smp.truth.exception_type
+                               for c, smp in base_rows) / N
 
     # simulated MTTR
     def mttr(r: dict[str, Any]) -> float:
@@ -139,9 +152,12 @@ def run(n: int = 300, seed: int = 11, judge_sample: int = 40) -> dict[str, Any]:
             continue
         ctx = {"event_id": c.event.event_id, "exception_type": c.classification.exception_type.value,
                "actions": sorted(r["got"]), "cited_sops": c.plan.cited_sops}
-        jr = large_router.run(LLMRequest("judge", "Score 1-5 how well the plan follows SOP and informs the customer.",
-                                         json.dumps(ctx), context=ctx), Usage(), force_large=True)
-        judge_scores.append(jr.result.data.get("score", 0))
+        try:
+            jr = large_router.run(LLMRequest("judge", JUDGE_SYSTEM, json.dumps(ctx), context=ctx, max_tokens=200),
+                                  Usage(), force_large=True)
+            judge_scores.append(float(jr.result.data.get("score", 0)))
+        except Exception:  # noqa: BLE001 - a judge failure should not kill the eval
+            continue
 
     rt = _redteam(p)
     metrics = {
@@ -157,10 +173,12 @@ def run(n: int = 300, seed: int = 11, judge_sample: int = 40) -> dict[str, Any]:
         "auto_resolution_precision": round(sum(r["act_ok"] for r in auto) / max(1, len(auto)), 3),
         "model_escalation_rate": round(sum(1 for r in rows if r["case"].escalations) / N, 3),
         "avg_cost_inr": round(sum(r["case"].usage.cost_inr for r in rows) / N, 4),
-        "always_large_avg_cost_inr": round(always_large_avg, 4),
-        "always_large_classification_accuracy": round(always_large_acc, 3),
-        "router_cost_saving_pct": round(100 * (1 - (sum(r["case"].usage.cost_inr for r in rows) / N) /
-                                               max(1e-9, always_large_avg)), 1),
+        "always_large_avg_cost_inr": None if always_large_avg is None else round(always_large_avg, 4),
+        "always_large_classification_accuracy": None if always_large_acc is None else round(always_large_acc, 3),
+        "router_cost_saving_pct": None if always_large_avg is None else round(
+            100 * (1 - (sum(r["case"].usage.cost_inr for r in rows) / N) / max(1e-9, always_large_avg)), 1),
+        "model_errors": sum(1 for r in rows if any("HTTP" in x or "invalid model output" in x or "error" in x
+                                                   for x in r["case"].notes)),
         "p50_latency_ms": round(lat[N // 2], 1),
         "p95_latency_ms": round(lat[min(N - 1, int(N * 0.95))], 1),
         "manual_mttr_hours_baseline": round(manual, 2),
@@ -203,8 +221,10 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=300)
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--out", default="reports")
+    ap.add_argument("--judge", type=int, default=40, help="cases to grade with LLM-as-judge")
+    ap.add_argument("--skip-baseline", action="store_true", help="skip the always-large-model comparison run")
     a = ap.parse_args()
-    rep = run(a.n, a.seed)
+    rep = run(a.n, a.seed, judge_sample=a.judge, baseline=not a.skip_baseline)
     out = Path(a.out)
     out.mkdir(exist_ok=True)
     (out / "eval_report.json").write_text(json.dumps(rep, indent=2, default=str))

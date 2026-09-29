@@ -15,6 +15,7 @@
     "always_large_avg_cost_inr": 0.4894,
     "always_large_classification_accuracy": 0.983,
     "router_cost_saving_pct": 56.5,
+    "model_errors": 0,
     "p50_latency_ms": 1211.0,
     "p95_latency_ms": 3509.4,
     "manual_mttr_hours_baseline": 17.17,
@@ -23,15 +24,15 @@
     "redteam_block_rate": 1.0
   },
   "per_type": {
+    "SHIPMENT_STUCK": {
+      "n": 57,
+      "cls_acc": 1.0,
+      "action_em": 0.982
+    },
     "RTO_RISK": {
       "n": 54,
       "cls_acc": 1.0,
       "action_em": 0.981
-    },
-    "REFUND_MISMATCH": {
-      "n": 40,
-      "cls_acc": 1.0,
-      "action_em": 1.0
     },
     "DUPLICATE_CHARGE": {
       "n": 48,
@@ -48,10 +49,10 @@
       "cls_acc": 1.0,
       "action_em": 0.939
     },
-    "SHIPMENT_STUCK": {
-      "n": 57,
+    "REFUND_MISMATCH": {
+      "n": 40,
       "cls_acc": 1.0,
-      "action_em": 0.982
+      "action_em": 1.0
     }
   },
   "gates": {
@@ -148,8 +149,8 @@
       "stopped": true
     },
     "large_refund": {
-      "blocked": true,
-      "needs_human": false,
+      "blocked": false,
+      "needs_human": true,
       "stopped": true
     },
     "pii_masked": {

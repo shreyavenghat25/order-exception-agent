@@ -32,6 +32,7 @@
 | always_large_avg_cost_inr | 0.4894 |
 | always_large_classification_accuracy | 0.983 |
 | router_cost_saving_pct | 56.5 |
+| model_errors | 0 |
 | p50_latency_ms | 1211.0 |
 | p95_latency_ms | 3509.4 |
 | manual_mttr_hours_baseline | 17.17 |

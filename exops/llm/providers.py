@@ -4,16 +4,47 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 from exops.llm.base import LLMRequest, LLMResult, estimate_tokens, extract_json
 
 
-def _post(url: str, payload: dict, headers: dict, timeout: float = 60.0) -> dict:
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
-                                 headers={"content-type": "application/json", **headers})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed https endpoints
-        return json.loads(resp.read())
+_RETRYABLE = {408, 409, 429, 500, 502, 503, 504, 529}
+_last_call = [0.0]
+
+
+def _throttle() -> None:
+    """Optional client-side rate limit (EXOPS_RPM) so free-tier APIs are not hammered."""
+    rpm = float(os.environ.get("EXOPS_RPM", "0"))
+    if rpm > 0:
+        wait = 60.0 / rpm - (time.monotonic() - _last_call[0])
+        if wait > 0:
+            time.sleep(wait)
+    _last_call[0] = time.monotonic()
+
+
+def _post(url: str, payload: dict, headers: dict, timeout: float = 60.0, retries: int = 6) -> dict:
+    body = json.dumps(payload).encode()
+    hdrs = {"content-type": "application/json", "user-agent": "exops/0.1", **headers}
+    for attempt in range(retries + 1):
+        _throttle()
+        req = urllib.request.Request(url, data=body, method="POST", headers=hdrs)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed https endpoints
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:300]
+            if e.code not in _RETRYABLE or attempt == retries:
+                raise RuntimeError(f"HTTP {e.code} from {url}: {detail}") from e
+            retry_after = e.headers.get("retry-after")
+            delay = float(retry_after) if retry_after and retry_after.replace(".", "").isdigit() else 2 ** attempt
+        except (urllib.error.URLError, TimeoutError) as e:
+            if attempt == retries:
+                raise RuntimeError(f"network error calling {url}: {e}") from e
+            delay = 2 ** attempt
+        time.sleep(min(delay, 60))
+    raise RuntimeError("unreachable")
 
 
 class AnthropicProvider:

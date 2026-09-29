@@ -12,7 +12,7 @@ from exops.agents.agents import ClassifierAgent, InvestigatorAgent, PlannerAgent
 from exops.audit import AuditLog
 from exops.config import Settings, get_settings
 from exops.guardrails import policy
-from exops.llm.router import BudgetExceeded, ModelRouter
+from exops.llm.router import BudgetExceeded, ModelRouter, ProviderError
 from exops.models import ActionResult, CaseRecord, ExceptionEvent, Status
 from exops.rag.retriever import SOPRetriever
 from exops.tools.backends import World
@@ -59,10 +59,16 @@ class Platform:
             verdict = policy.evaluate(plan, cls, self.registry, case.observations, self.s)
             case.verdict = verdict
             self.audit.record(case.case_id, "guardrails", "policy", verdict.model_dump())
-        except BudgetExceeded as e:
+        except (BudgetExceeded, ProviderError) as e:
             case.status = Status.ESCALATED
             case.notes.append(str(e))
-            self.audit.record(case.case_id, "escalated", "budget", {"reason": str(e)})
+            actor = "budget" if isinstance(e, BudgetExceeded) else "model_error"
+            self.audit.record(case.case_id, "escalated", actor, {"reason": str(e)[:500]})
+            return case
+        except (ValueError, TypeError, KeyError) as e:  # malformed model output (bad action schema etc.)
+            case.status = Status.ESCALATED
+            case.notes.append(f"invalid model output: {e}")
+            self.audit.record(case.case_id, "escalated", "model_error", {"reason": str(e)[:500]})
             return case
 
         if not verdict.allowed:

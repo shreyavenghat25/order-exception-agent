@@ -16,6 +16,10 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+class ProviderError(RuntimeError):
+    """The model API failed or returned unusable output (after retries)."""
+
+
 @dataclass
 class RoutedResult:
     result: LLMResult
@@ -37,7 +41,11 @@ class ModelRouter:
         if usage.cost_inr >= self.s.max_cost_inr_per_case:
             raise BudgetExceeded(f"cost budget Rs {self.s.max_cost_inr_per_case} exhausted")
         tier, provider = self.tiers[tier_name]
-        r = provider.complete(req)
+        try:
+            r = provider.complete(req)
+        except Exception as e:  # noqa: BLE001 - any API/parse failure becomes a routed error
+            usage.add(Usage(calls=1))
+            raise ProviderError(f"{tier.model}: {e}") from e
         usage.add(Usage(input_tokens=r.input_tokens, output_tokens=r.output_tokens,
                         cost_inr=self._cost(tier, r), latency_ms=r.latency_ms, calls=1))
         return r
@@ -45,11 +53,14 @@ class ModelRouter:
     def run(self, req: LLMRequest, usage: Usage, force_large: bool = False) -> RoutedResult:
         if force_large:
             return RoutedResult(self._call("large", req, usage), "large", False)
-        r = self._call("small", req, usage)
+        try:
+            r = self._call("small", req, usage)
+        except ProviderError:
+            return RoutedResult(self._call("large", req, usage), "large", True)  # small model failed -> large
         conf = float(r.data.get("confidence", 0))
         if conf >= self.s.escalate_below_confidence:
             return RoutedResult(r, "small", False)
         try:
             return RoutedResult(self._call("large", req, usage), "large", True)
-        except BudgetExceeded:
+        except (BudgetExceeded, ProviderError):
             return RoutedResult(r, "small", False)  # keep small answer; guardrails will gate low confidence
